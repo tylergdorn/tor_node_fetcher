@@ -35,30 +35,52 @@ func New(sqlitePath string) (*TorStorage, error) {
 	return &TorStorage{db: db}, nil
 }
 
-func (s *TorStorage) InsertBatch(ctx context.Context, nodes []TorExitNode) {
-	s.db.WithContext(ctx).Create(nodes)
+func (s *TorStorage) InsertBatch(ctx context.Context, nodes []TorExitNode) error {
+	err := s.db.WithContext(ctx).Create(nodes).Error
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-func (s *TorStorage) InsertAllowIP(entry AllowListIP) {
-	s.db.Clauses(clause.OnConflict{
+func (s *TorStorage) InsertAllowIP(ctx context.Context, entry AllowListIP) error {
+	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "ip"}},
 		DoUpdates: clause.AssignmentColumns([]string{"note", "time_added"}),
-	}).Create(&entry)
+	}).Create(&entry).Error
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-func (s *TorStorage) DeleteAllowIP(IP string) {
-	s.db.Delete(&AllowListIP{IP: IP})
+func (s *TorStorage) DeleteAllowIP(ctx context.Context, IP string) error {
+	if err := s.db.WithContext(ctx).Delete(&AllowListIP{IP: IP}).Error; err != nil {
+		return err
+	}
+	return nil
 }
 
-func (s *TorStorage) GetAllowListIPs() []AllowListIP {
+func (s *TorStorage) GetAllowListIPs(ctx context.Context) ([]AllowListIP, error) {
 	list := []AllowListIP{}
-	s.db.Model(&list).Find(&list)
-	return list
+	if err := s.db.WithContext(ctx).Model(&list).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
 }
 
-func (s *TorStorage) GetTorNodes() []TorExitNode {
-	sub := s.db.Model(AllowListIP{}).Select("ip")
+func (s *TorStorage) GetTorNodesPaginated(ctx context.Context, limit int, offset int) ([]TorExitNode, error) {
+	sub := s.db.WithContext(ctx).Model(AllowListIP{}).Select("ip")
+	if sub.Error != nil {
+		return nil, sub.Error
+	}
 	res := []TorExitNode{}
-	s.db.Model(TorExitNode{}).Where("ip NOT IN (?)", sub).Find(&res)
-	return res
+	if err := s.db.Model(TorExitNode{}).Where("ip NOT IN (?)", sub).Limit(limit).Offset(offset).Find(&res).Error; err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (s *TorStorage) GetTorNodes(ctx context.Context) ([]TorExitNode, error) {
+	return s.GetTorNodesPaginated(ctx, -1, -1)
 }
